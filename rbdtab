@@ -1,0 +1,2 @@
+# rbd-image-spec   rbd-map-options       mount-point               fs-type (optional)  mount=options (optional)
+rbd_mixed/imagenet id=smil_rbd,read-only /mnt/rbd/dataset/imagenet erofs

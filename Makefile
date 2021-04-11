@@ -1,10 +1,12 @@
 PHONY: install, uninstall
-install: rbdtab-generator
+install: rbdmap-generator
 	mkdir -p /etc/systemd/system-generators
-	install -t /etc/systemd/system-generators rbdtab-generator
+	install -t /etc/systemd/system-generators rbdmap-generator
+	install --mode=644 -t /etc/systemd/system units/*
 	systemctl daemon-reload
 
 uninstall:
-	if [ -f /etc/systemd/system-generators/rbdtab-generator ]; then \
-		rm -f /etc/systemd/system-generators/rbdtab-generator && systemctl daemon-reload; \
-	fi
+	rm -f /etc/systemd/system-generators/rbdmap-generator
+	rm -f /etc/systemd/system/rbdmap-pre.target
+	rm -f /etc/systemd/system/rbdmap.target
+	systemctl daemon-reload;

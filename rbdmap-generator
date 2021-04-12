@@ -1,9 +1,7 @@
 #!/usr/bin/python3
 
-import enum
 import os
 import re
-import shlex
 import string
 import sys
 import logging
@@ -66,10 +64,29 @@ def normalize_rbd_spec(spec: str):
         spec = 'rbd/' + spec
     return spec
 
+def split_options(options: str):
+    in_quote = False
+    working = ''
+    for c in options:
+        if c == "'":
+            in_quote = not in_quote
+        elif c == ',' and not in_quote:
+            yield working
+            working = ''
+        else:
+            working += c
+    yield working
+
 SYSTEMD_KEY_PREFIX = 'x-systemd.'
 RBDMAP_TARGET = 'rbdmap.target'
+RBD_MAP_ARGS = {
+    # global args
+    'conf', 'cluster', 'id', 'name', 'mon_host', 'keyfile', 'keyring',
+    # map args
+    'device-type', 'read-only', 'exclusive', 'quiesce', 'quiesce-hook',
+}
 
-def parse_args(args: str):
+def parse_opts(opts: str):
     bool_options = {
         'fail': True,
         'auto': True,
@@ -83,8 +100,9 @@ def parse_args(args: str):
         'after': [],
     }
     rbd_map_args = []
-    if args:
-        for a in args.split(','):
+    rbd_map_arg_options = []
+    if opts:
+        for a in split_options(opts):
             if a in bool_options:
                 bool_options[a] = True
                 continue
@@ -94,19 +112,33 @@ def parse_args(args: str):
                     bool_options[k] = False
                     continue
 
+            kv = a.split('=', maxsplit=1)
             if a.startswith('x-'):
                 if a.startswith(SYSTEMD_KEY_PREFIX):
-                    if '=' not in a:
+                    if len(kv) < 2:
                         logger.warning('option %s should contains a value, ignoring', a)
                         continue
-                    k, v = a[len(SYSTEMD_KEY_PREFIX):].split('=', 2)
+                    k, v = kv
+                    k = k[len(SYSTEMD_KEY_PREFIX):]
                     if k not in systemd_unit_options:
                         logger.warning('unknown systemd option %s, ignoring', a)
                         continue
                     systemd_unit_options[k].append(v)
                     continue
+            if kv[0] == 'options':
+                if len(kv) < 2:
+                    logger.warning('option %s should contains a value, ignoring', a)
+                    continue
+                rbd_map_arg_options += kv[1].split(',')
+                continue
+            if kv[0] in RBD_MAP_ARGS:
+                rbd_map_args.append(a)
+                continue
 
-            rbd_map_args.append(a)
+            rbd_map_arg_options.append(a)
+
+    if rbd_map_arg_options:
+        rbd_map_args.append('options=' + ','.join(rbd_map_arg_options))
 
     if bool_options['auto']:
         if bool_options['fail']:
@@ -122,13 +154,13 @@ def generate_one(line: str, dir_fd: int):
     def opener(path, flags):
         return os.open(path, flags, dir_fd=dir_fd, mode=0o644)
 
-    cells = shlex.split(line)
-    rbd_spec, map_args = cells
+    cells = line.split(maxsplit=1)
+    rbd_spec, map_opts = cells
     rbd_spec = normalize_rbd_spec(rbd_spec)
     rbd_dev_path = '/dev/rbd/' + rbd_spec
     map_unit_name = 'rbdmap-{}.service'.format(systemd_escape(rbd_spec))
     device_unit_name = systemd_escape_path(rbd_dev_path) + '.device'
-    systemd_unit_options, rbd_map_args = parse_args(map_args)
+    systemd_unit_options, rbd_map_args = parse_opts(map_opts)
 
     unit_extra = []
     unit_options_map = [
@@ -196,6 +228,7 @@ def main():
     else:
         print('Wrong number of args', file=sys.stderr)
         return 1
+    return 0
 
 if __name__ == '__main__':
     exit(main())
